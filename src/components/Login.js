@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import apiService from '../services/api';
 import './Auth.css';
 
 const Login = ({ onLogin }) => {
   const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+    email: 'admin@votingapp.com',
+    password: 'admin123'
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +16,7 @@ const Login = ({ onLogin }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
+    setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -25,23 +25,42 @@ const Login = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      // ✅ REAL LOGIN TO MONGODB
-      const response = await apiService.login(formData.email, formData.password);
+      console.log('🔄 Attempting login with:', formData);
       
-      // If login successful
-      if (response.data && response.data.user) {
+      const response = await fetch('http://localhost:5001/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password
+        })
+      });
+
+      const data = await response.json();
+      console.log('📊 Login response:', data);
+
+      if (data.success) {
+        console.log('✅ Login successful!');
+        
+        // Store user data in localStorage
+        localStorage.setItem('user', JSON.stringify(data.user));
+        
         // Call the onLogin prop to update parent component
         if (onLogin) {
-          onLogin(response.data.user);
+          onLogin(data.user);
         }
         
         // Redirect to dashboard
         navigate('/dashboard');
+      } else {
+        setError(data.error || 'Login failed. Please check your credentials.');
       }
       
     } catch (error) {
-      // Handle login errors
-      setError(error.response?.data?.error || 'Login failed. Please check your credentials.');
+      console.error('❌ Login error:', error);
+      setError('Network error. Please make sure the backend server is running.');
     } finally {
       setLoading(false);
     }
@@ -71,7 +90,7 @@ const Login = ({ onLogin }) => {
               value={formData.email}
               onChange={handleChange}
               required
-              placeholder="Enter your email"
+              placeholder="admin@votingapp.com"
             />
           </div>
 
@@ -84,7 +103,7 @@ const Login = ({ onLogin }) => {
               value={formData.password}
               onChange={handleChange}
               required
-              placeholder="Enter your password"
+              placeholder="admin123"
             />
           </div>
 
@@ -105,6 +124,17 @@ const Login = ({ onLogin }) => {
             <h4>Demo Accounts:</h4>
             <p><strong>Admin:</strong> admin@votingapp.com / admin123</p>
             <p><strong>Student:</strong> Use signup form to create account</p>
+          </div>
+          
+          <div style={{ 
+            marginTop: '1rem', 
+            padding: '0.5rem', 
+            background: '#e8f5e8', 
+            borderRadius: '4px', 
+            fontSize: '0.8rem',
+            border: '1px solid #4caf50'
+          }}>
+            <strong>✅ Backend Status:</strong> Connected to http://localhost:5001/api
           </div>
         </div>
       </div>

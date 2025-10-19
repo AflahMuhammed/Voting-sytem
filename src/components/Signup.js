@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import apiService from '../services/api';
 import './Auth.css';
 
 const Signup = ({ onSignup }) => {
@@ -22,6 +21,7 @@ const Signup = ({ onSignup }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
+    setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -36,31 +36,52 @@ const Signup = ({ onSignup }) => {
       return;
     }
 
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      setLoading(false);
+      return;
+    }
+
     try {
-      // ✅ THIS ADDS STUDENT TO MONGODB
-      const response = await apiService.signup({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        collegeId: formData.collegeId,
-        email: formData.email,
-        password: formData.password,
-        class: formData.class
+      console.log('🔄 Attempting signup with:', formData);
+      
+      const response = await fetch('http://localhost:5001/api/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          collegeId: formData.collegeId,
+          email: formData.email,
+          password: formData.password,
+          class: formData.class
+        })
       });
 
-      // Auto-login after successful signup
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+      const data = await response.json();
+      console.log('📊 Signup response:', data);
+
+      if (data.success) {
+        console.log('✅ Signup successful!');
         
+        // Store user data in localStorage
+        localStorage.setItem('user', JSON.stringify(data.user));
+        
+        // Call the onSignup prop
         if (onSignup) {
-          onSignup(response.data.user);
+          onSignup(data.user);
         }
         
         navigate('/dashboard');
+      } else {
+        setError(data.error || 'Registration failed. Please try again.');
       }
       
     } catch (error) {
-      setError(error.response?.data?.error || 'Registration failed');
+      console.error('❌ Signup error:', error);
+      setError('Network error. Please make sure the backend server is running.');
     } finally {
       setLoading(false);
     }

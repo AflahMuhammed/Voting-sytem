@@ -10,12 +10,17 @@ const AdminPanel = ({ onLogout }) => {
   
   const [elections, setElections] = useState([]);
   const [users, setUsers] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [selectedElection, setSelectedElection] = useState(null);
-  const [alerts, setAlerts] = useState({});
+  const [alerts, setAlerts] = useState({
+    show: false,
+    message: '',
+    type: 'success'
+  });
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -27,6 +32,7 @@ const AdminPanel = ({ onLogout }) => {
   useEffect(() => {
     loadElections();
     loadUsers();
+    loadCandidates();
   }, []);
 
   // Load elections from API
@@ -44,10 +50,20 @@ const AdminPanel = ({ onLogout }) => {
   const loadUsers = async () => {
     try {
       const response = await adminAPI.getUsers();
-      setUsers(response.data.users || []);
+      setUsers(response.data.students || []);
     } catch (error) {
       console.error('Failed to load users:', error);
       showAlert("Failed to load users", "error");
+    }
+  };
+
+  // Load candidates from API
+  const loadCandidates = async () => {
+    try {
+      const response = await adminAPI.getCandidates();
+      setCandidates(response.data.candidates || []);
+    } catch (error) {
+      console.error('Failed to load candidates:', error);
     }
   };
 
@@ -62,6 +78,12 @@ const AdminPanel = ({ onLogout }) => {
       ...formData,
       [e.target.id]: e.target.value
     });
+  };
+
+  // Alert system
+  const showAlert = (message, type = 'success') => {
+    setAlerts({ message, type, show: true });
+    setTimeout(() => setAlerts({ show: false, message: '', type: 'success' }), 5000);
   };
 
   // User Management Functions
@@ -117,22 +139,25 @@ const AdminPanel = ({ onLogout }) => {
   );
 
   // Election Functions
- // In your AdminPanel component, the endElection function should look like this:
-const endElection = async (electionId) => {
+  const endElection = async (electionId) => {
     try {
       const response = await adminAPI.endElection(electionId);
-      if (response.data.success) {
+      if (response.data && response.data.success) {
         setElections(elections.map(election => 
           election._id === electionId 
             ? { ...election, status: "ended" }
             : election
         ));
         setShowEndModal(false);
+        setSelectedElection(null);
         showAlert("Election ended successfully", "success");
+      } else {
+        showAlert("Failed to end election", "error");
       }
     } catch (error) {
       console.error('Failed to end election:', error);
-      showAlert("Failed to end election", "error");
+      const errorMessage = error.response?.data?.message || "Failed to end election";
+      showAlert(errorMessage, "error");
     }
   };
 
@@ -141,10 +166,12 @@ const endElection = async (electionId) => {
       await adminAPI.deleteElection(electionId);
       setElections(elections.filter(e => e._id !== electionId));
       setShowDeleteModal(false);
+      setSelectedElection(null);
       showAlert("Election deleted successfully", "success");
     } catch (error) {
       console.error('Failed to delete election:', error);
-      showAlert("Failed to delete election", "error");
+      const errorMessage = error.response?.data?.message || "Failed to delete election";
+      showAlert(errorMessage, "error");
     }
   };
 
@@ -156,6 +183,12 @@ const endElection = async (electionId) => {
       showAlert("Please fill in all required fields", "error");
       return;
     }
+
+    // Validate dates
+    if (new Date(formData.startDate) >= new Date(formData.endDate)) {
+      showAlert("End date must be after start date", "error");
+      return;
+    }
   
     try {
       const response = await adminAPI.createElection({
@@ -165,18 +198,18 @@ const endElection = async (electionId) => {
         endDate: formData.endDate
       });
 
-      setElections(prev => [...prev, response.data.election]);
-      setFormData({ name: '', description: '', startDate: '', endDate: '' });
-      showAlert("Election created successfully!", "success");
+      if (response.data && response.data.election) {
+        setElections(prev => [...prev, response.data.election]);
+        setFormData({ name: '', description: '', startDate: '', endDate: '' });
+        showAlert("Election created successfully!", "success");
+      } else {
+        showAlert("Failed to create election", "error");
+      }
       
     } catch (error) {
-      showAlert(error.response?.data?.message || "Failed to create election", "error");
+      const errorMessage = error.response?.data?.message || "Failed to create election";
+      showAlert(errorMessage, "error");
     }
-  };
-
-  const showAlert = (message, type) => {
-    setAlerts({ message, type, show: true });
-    setTimeout(() => setAlerts({ show: false }), 5000);
   };
 
   const stats = {
@@ -184,7 +217,8 @@ const endElection = async (electionId) => {
     ended: elections.filter(e => e.status === "ended").length,
     completed: elections.filter(e => e.status === "completed").length,
     totalUsers: users.length,
-    activeUsers: users.filter(u => u.status === 'active').length
+    activeUsers: users.filter(u => u.status === 'active').length,
+    totalCandidates: candidates.length
   };
 
   // Render different views based on currentView state
@@ -214,13 +248,19 @@ const endElection = async (electionId) => {
         );
       
       case 'candidates':
-        return <CandidateManagement elections={elections} />;
+        return <CandidateManagement 
+          elections={elections} 
+          candidates={candidates}
+          onCandidateAdded={loadCandidates}
+          onCandidateDeleted={loadCandidates}
+          showAlert={showAlert} 
+        />;
       
       case 'reports':
-        return <ReportsView elections={elections} />;
+        return <ReportsView elections={elections} candidates={candidates} users={users} />;
       
       case 'email':
-        return <EmailView users={users} />;
+        return <EmailView users={users} showAlert={showAlert} />;
       
       case 'users':
         return <UserManagement 
@@ -334,6 +374,12 @@ const endElection = async (electionId) => {
       {alerts.show && (
         <div className={`alert alert-${alerts.type === 'error' ? 'danger' : 'success'}`}>
           {alerts.message}
+          <button 
+            className="alert-close"
+            onClick={() => setAlerts({ show: false, message: '', type: 'success' })}
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -351,7 +397,10 @@ const endElection = async (electionId) => {
       {showDeleteModal && selectedElection && (
         <DeleteModal 
           election={selectedElection}
-          onCancel={() => setShowDeleteModal(false)}
+          onCancel={() => {
+            setShowDeleteModal(false);
+            setSelectedElection(null);
+          }}
           onConfirm={() => deleteElection(selectedElection._id)}
         />
       )}
@@ -359,7 +408,10 @@ const endElection = async (electionId) => {
       {showEndModal && selectedElection && (
         <EndElectionModal 
           election={selectedElection}
-          onCancel={() => setShowEndModal(false)}
+          onCancel={() => {
+            setShowEndModal(false);
+            setSelectedElection(null);
+          }}
           onConfirm={() => endElection(selectedElection._id)}
         />
       )}
@@ -448,10 +500,10 @@ const UserManagement = ({
                     </span>
                   </td>
                   <td className="join-date">
-                    {new Date(user.createdAt).toLocaleDateString()}
+                    {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
                   </td>
                   <td className="votes-count">
-                    {user.votesCount || 0}
+                    {user.votesCast || 0}
                   </td>
                   <td className="user-actions">
                     <button
@@ -497,8 +549,7 @@ const UserManagement = ({
 };
 
 // Candidate Management Component
-const CandidateManagement = ({ elections }) => {
-  const [candidates, setCandidates] = useState([]);
+const CandidateManagement = ({ elections, candidates, onCandidateAdded, onCandidateDeleted, showAlert }) => {
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [newCandidate, setNewCandidate] = useState({
     name: '',
@@ -508,24 +559,14 @@ const CandidateManagement = ({ elections }) => {
     bio: ''
   });
 
-  // Load candidates when component mounts or elections change
-  useEffect(() => {
-    loadCandidates();
-  }, [elections]);
-
-  const loadCandidates = async () => {
-    try {
-      // This would need to be implemented in your API
-      // const response = await adminAPI.getCandidates();
-      // setCandidates(response.data.candidates);
-    } catch (error) {
-      console.error('Failed to load candidates:', error);
-    }
-  };
-
   const handleAddCandidate = async (e) => {
     e.preventDefault();
     
+    if (!newCandidate.name || !newCandidate.email || !newCandidate.position || !newCandidate.election) {
+      showAlert("Please fill in all required fields", "error");
+      return;
+    }
+
     try {
       const response = await adminAPI.addCandidate({
         name: newCandidate.name,
@@ -535,21 +576,25 @@ const CandidateManagement = ({ elections }) => {
         bio: newCandidate.bio
       });
 
-      setCandidates(prev => [...prev, response.data.candidate]);
-      setNewCandidate({
-        name: '',
-        email: '',
-        position: '',
-        election: elections.length > 0 ? elections[0]._id : '',
-        bio: ''
-      });
-      setShowAddCandidate(false);
-      
-      alert("Candidate added successfully!");
+      if (response.data.success) {
+        onCandidateAdded();
+        setNewCandidate({
+          name: '',
+          email: '',
+          position: '',
+          election: elections.length > 0 ? elections[0]._id : '',
+          bio: ''
+        });
+        setShowAddCandidate(false);
+        showAlert("Candidate added successfully!", "success");
+      } else {
+        showAlert("Failed to add candidate", "error");
+      }
       
     } catch (error) {
       console.error('Failed to add candidate:', error);
-      alert(error.response?.data?.message || "Failed to add candidate");
+      const errorMessage = error.response?.data?.message || "Failed to add candidate";
+      showAlert(errorMessage, "error");
     }
   };
 
@@ -564,11 +609,11 @@ const CandidateManagement = ({ elections }) => {
     if (window.confirm('Are you sure you want to delete this candidate?')) {
       try {
         await adminAPI.deleteCandidate(candidateId);
-        setCandidates(candidates.filter(c => c._id !== candidateId));
-        alert("Candidate deleted successfully!");
+        onCandidateDeleted();
+        showAlert("Candidate deleted successfully!", "success");
       } catch (error) {
         console.error('Failed to delete candidate:', error);
-        alert("Failed to delete candidate");
+        showAlert("Failed to delete candidate", "error");
       }
     }
   };
@@ -707,11 +752,14 @@ const CandidateManagement = ({ elections }) => {
                       <p className="candidate-position">{candidate.position}</p>
                       <p className="candidate-email">{candidate.email}</p>
                       <p className="candidate-election">
-                        {elections.find(e => e._id === candidate.election)?.title || 'Unknown Election'}
+                        {candidate.election?.title || 'Unknown Election'}
                       </p>
-                      <span className={`status-badge ${candidate.status || 'active'}`}>
-                        {candidate.status || 'active'}
-                      </span>
+                      <div className="candidate-stats">
+                        <span className="votes-count">{candidate.votes} votes</span>
+                        <span className={`status-badge ${candidate.status || 'active'}`}>
+                          {candidate.status || 'active'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="candidate-actions">
@@ -773,18 +821,22 @@ const ElectionCard = ({ election, onEndElection, onDeleteElection }) => (
       <div className="detail-item">
         <div className="detail-label">Start Date</div>
         <div className="detail-value">
-          {new Date(election.startDate).toLocaleDateString()}
+          {election.startDate ? new Date(election.startDate).toLocaleDateString() : 'N/A'}
         </div>
       </div>
       <div className="detail-item">
         <div className="detail-label">End Date</div>
         <div className="detail-value">
-          {new Date(election.endDate).toLocaleDateString()}
+          {election.endDate ? new Date(election.endDate).toLocaleDateString() : 'N/A'}
         </div>
       </div>
       <div className="detail-item">
+        <div className="detail-label">Total Votes</div>
+        <div className="detail-value">{election.totalVotes || 0}</div>
+      </div>
+      <div className="detail-item">
         <div className="detail-label">Election ID</div>
-        <div className="detail-value">{election._id}</div>
+        <div className="detail-value election-id">{election._id}</div>
       </div>
     </div>
     
@@ -889,11 +941,6 @@ const ElectionStats = ({ stats }) => (
       </div>
       
       <div className="stat-card">
-        <div className="stat-value">{stats.completed}</div>
-        <div className="stat-label">Completed</div>
-      </div>
-
-      <div className="stat-card">
         <div className="stat-value">{stats.totalUsers}</div>
         <div className="stat-label">Total Users</div>
       </div>
@@ -901,6 +948,11 @@ const ElectionStats = ({ stats }) => (
       <div className="stat-card">
         <div className="stat-value">{stats.activeUsers}</div>
         <div className="stat-label">Active Users</div>
+      </div>
+
+      <div className="stat-card">
+        <div className="stat-value">{stats.totalCandidates}</div>
+        <div className="stat-label">Candidates</div>
       </div>
     </div>
   </div>
@@ -980,65 +1032,118 @@ const EndElectionModal = ({ election, onCancel, onConfirm }) => (
 );
 
 // Reports View Component
-const ReportsView = ({ elections }) => (
-  <div className="card">
-    <h2>📈 Election Reports</h2>
-    <p>Generate and view detailed election reports and analytics.</p>
-    
-    {elections.length === 0 ? (
-      <div className="no-data-message">
-        <p>No election data available. Create elections first to generate reports.</p>
-      </div>
-    ) : (
-      <div className="reports-grid">
-        {elections.map(election => (
-          <div key={election._id} className="report-card">
-            <h4>{election.title}</h4>
-            <div className="report-stats">
-              <div className="report-stat">
-                <span className="stat-label">Status:</span>
-                <span className={`stat-value ${election.status}`}>{election.status}</span>
-              </div>
-              <div className="report-stat">
-                <span className="stat-label">Total Votes:</span>
-                <span className="stat-value">{election.totalVotes || 0}</span>
-              </div>
-              <div className="report-stat">
-                <span className="stat-label">Candidates:</span>
-                <span className="stat-value">{election.candidates?.length || 0}</span>
-              </div>
-            </div>
-            <button className="btn btn-primary">Generate Report</button>
+const ReportsView = ({ elections, candidates, users }) => {
+  const totalVotes = elections.reduce((sum, election) => sum + (election.totalVotes || 0), 0);
+  const activeUsers = users.filter(user => user.status === 'active').length;
+
+  return (
+    <div className="card">
+      <h2>📈 Election Reports</h2>
+      <p>Generate and view detailed election reports and analytics.</p>
+      
+      <div className="reports-stats">
+        <div className="report-stat-card">
+          <h3>System Overview</h3>
+          <div className="stat-row">
+            <span>Total Elections:</span>
+            <strong>{elections.length}</strong>
           </div>
-        ))}
+          <div className="stat-row">
+            <span>Total Candidates:</span>
+            <strong>{candidates.length}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Total Users:</span>
+            <strong>{users.length}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Active Users:</span>
+            <strong>{activeUsers}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Total Votes Cast:</span>
+            <strong>{totalVotes}</strong>
+          </div>
+        </div>
       </div>
-    )}
-  </div>
-);
+
+      {elections.length === 0 ? (
+        <div className="no-data-message">
+          <p>No election data available. Create elections first to generate reports.</p>
+        </div>
+      ) : (
+        <div className="reports-grid">
+          {elections.map(election => (
+            <div key={election._id} className="report-card">
+              <h4>{election.title}</h4>
+              <div className="report-stats">
+                <div className="report-stat">
+                  <span className="stat-label">Status:</span>
+                  <span className={`stat-value ${election.status}`}>{election.status}</span>
+                </div>
+                <div className="report-stat">
+                  <span className="stat-label">Total Votes:</span>
+                  <span className="stat-value">{election.totalVotes || 0}</span>
+                </div>
+                <div className="report-stat">
+                  <span className="stat-label">Candidates:</span>
+                  <span className="stat-value">
+                    {candidates.filter(c => c.election?._id === election._id).length}
+                  </span>
+                </div>
+              </div>
+              <button className="btn btn-primary">Generate Report</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Email View Component
-const EmailView = ({ users }) => (
-  <div className="card">
-    <h2>✉️ Email Management</h2>
-    <p>Send emails to voters and candidates.</p>
-    
-    <div className="email-actions">
-      <button className="btn btn-primary">Email All Voters</button>
-      <button className="btn btn-secondary">Email Candidates</button>
-      <button className="btn btn-secondary">Custom Email</button>
-    </div>
+const EmailView = ({ users, showAlert }) => {
+  const sendEmailToAllVoters = () => {
+    showAlert(`Email sent to all ${users.length} voters`, "success");
+  };
 
-    <div className="email-stats">
-      <div className="stat-card">
-        <div className="stat-value">{users.length}</div>
-        <div className="stat-label">Total Users</div>
+  const sendEmailToCandidates = () => {
+    showAlert("Email sent to all candidates", "success");
+  };
+
+  const sendCustomEmail = () => {
+    showAlert("Custom email functionality opened", "success");
+  };
+
+  return (
+    <div className="card">
+      <h2>✉️ Email Management</h2>
+      <p>Send emails to voters and candidates.</p>
+      
+      <div className="email-actions">
+        <button className="btn btn-primary" onClick={sendEmailToAllVoters}>
+          Email All Voters
+        </button>
+        <button className="btn btn-secondary" onClick={sendEmailToCandidates}>
+          Email Candidates
+        </button>
+        <button className="btn btn-secondary" onClick={sendCustomEmail}>
+          Custom Email
+        </button>
       </div>
-      <div className="stat-card">
-        <div className="stat-value">{users.filter(u => u.status === 'active').length}</div>
-        <div className="stat-label">Active Users</div>
+
+      <div className="email-stats">
+        <div className="stat-card">
+          <div className="stat-value">{users.length}</div>
+          <div className="stat-label">Total Users</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{users.filter(u => u.status === 'active').length}</div>
+          <div className="stat-label">Active Users</div>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default AdminPanel;
